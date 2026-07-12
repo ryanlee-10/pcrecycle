@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
+import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
 
 // Interfaces
 export interface PCPart {
@@ -55,17 +56,18 @@ interface StoreContextType {
   addToCart: (id: string) => void;
   removeFromCart: (id: string) => void;
   clearCart: () => void;
-  submitDonation: (donation: Omit<Donation, "id" | "status" | "submittedAt">) => void;
-  updateDonationStatus: (id: string, status: Donation["status"]) => void;
-  addPart: (part: Omit<PCPart, "id">) => void;
-  updatePart: (id: string, updates: Partial<PCPart>) => void;
-  deletePart: (id: string) => void;
-  placeOrder: (customer: { name: string; email: string; address: string }) => boolean;
+  submitDonation: (donation: Omit<Donation, "id" | "status" | "submittedAt">) => Promise<void>;
+  updateDonationStatus: (id: string, status: Donation["status"]) => Promise<void>;
+  addPart: (part: Omit<PCPart, "id">) => Promise<void>;
+  updatePart: (id: string, updates: Partial<PCPart>) => Promise<void>;
+  deletePart: (id: string) => Promise<void>;
+  placeOrder: (customer: { name: string; email: string; address: string }) => Promise<boolean>;
+  isUsingCloudDb: boolean;
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
 
-// Initial Seed Data
+// Initial Seed Data (Fallbacks for Local Storage)
 const defaultCharities: Charity[] = [
   { id: "world-computer-exchange", name: "World Computer Exchange", description: "Provides computers and digital literacy training to youth in developing countries.", totalFundsRaised: 1250 },
   { id: "eff", name: "Electronic Frontier Foundation", description: "Defends digital privacy, free speech, and innovation in the digital age.", totalFundsRaised: 890 },
@@ -159,53 +161,58 @@ const defaultInventory: PCPart[] = [
   }
 ];
 
-const defaultDonations: Donation[] = [
-  {
-    id: "don-1",
-    companyName: "Acme Corp",
-    contactEmail: "it@acme.com",
-    partsDescription: "15x Intel Core i5 CPUs (8th Gen), 10x 8GB DDR4 RAM sticks, 5x 500W Power Supplies",
-    quantity: 30,
-    conditionEstimate: "Good - Removed from working office PCs during an upgrade.",
-    status: "approved",
-    submittedAt: "2026-07-10T14:32:00Z"
-  },
-  {
-    id: "don-2",
-    companyName: "Globex Industries",
-    contactEmail: "hardware@globex.org",
-    partsDescription: "4x NVIDIA GTX 1060 GPUs, 2x ATX Cases, 3x Intel Motherboards",
-    quantity: 9,
-    conditionEstimate: "Fair - Some dust, fans spinning fine, fully tested.",
-    status: "pending",
-    submittedAt: "2026-07-12T09:15:00Z"
-  }
-];
+// Mapping helper functions
+const mapDbToPart = (db: any): PCPart => ({
+  id: db.id,
+  name: db.name,
+  category: db.category,
+  specs: db.specs || {},
+  condition: db.condition,
+  price: Number(db.price),
+  donorName: db.donor_name,
+  charityId: db.charity_id,
+  status: db.status,
+  imageUrl: db.image_url || "",
+});
 
-const defaultOrders: Order[] = [
-  {
-    id: "ord-1",
-    customerName: "Alice Smith",
-    customerEmail: "alice@gmail.com",
-    shippingAddress: "123 Main St, Seattle, WA 98101",
-    items: [
-      {
-        id: "part-old-1",
-        name: "AMD Ryzen 5 3600 CPU",
-        category: "CPU",
-        specs: { Socket: "AM4" },
-        condition: "Good",
-        price: 75,
-        donorName: "TechCorp LLC",
-        charityId: "world-computer-exchange",
-        status: "sold",
-        imageUrl: "https://images.unsplash.com/photo-1591799264318-7e6ef8ddb7ea?w=400&q=80"
-      }
-    ],
-    totalPrice: 75,
-    orderDate: "2026-07-08T18:24:00Z"
-  }
-];
+const mapPartToDb = (part: Omit<PCPart, "id"> | PCPart) => ({
+  name: part.name,
+  category: part.category,
+  specs: part.specs,
+  condition: part.condition,
+  price: part.price,
+  donor_name: part.donorName,
+  charity_id: part.charityId,
+  status: part.status,
+  image_url: part.imageUrl,
+});
+
+const mapDbToDonation = (db: any): Donation => ({
+  id: db.id,
+  companyName: db.company_name,
+  contactEmail: db.contact_email,
+  partsDescription: db.parts_description,
+  quantity: db.quantity,
+  conditionEstimate: db.condition_estimate,
+  status: db.status,
+  submittedAt: db.submitted_at,
+});
+
+const mapDonationToDb = (don: Omit<Donation, "id" | "status" | "submittedAt"> | Donation) => ({
+  company_name: don.companyName,
+  contact_email: don.contactEmail,
+  parts_description: don.partsDescription,
+  quantity: don.quantity,
+  condition_estimate: don.conditionEstimate,
+  status: "status" in don ? don.status : "pending",
+});
+
+const mapDbToCharity = (db: any): Charity => ({
+  id: db.id,
+  name: db.name,
+  description: db.description || "",
+  totalFundsRaised: Number(db.total_funds_raised || 0),
+});
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [inventory, setInventory] = useState<PCPart[]>([]);
@@ -214,66 +221,149 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [charities, setCharities] = useState<Charity[]>([]);
   const [cart, setCart] = useState<string[]>([]);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
+  
+  const [isUsingCloudDb, setIsUsingCloudDb] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load from local storage
+  // Sync theme and cart which are always local features
   useEffect(() => {
     try {
       const storedTheme = localStorage.getItem("pcrecycle_theme") as "dark" | "light" | null;
       if (storedTheme) {
         setTheme(storedTheme);
         document.documentElement.className = storedTheme === "light" ? "light-theme" : "";
-      } else {
-        document.documentElement.className = "";
       }
 
-      const storedInventory = localStorage.getItem("pcrecycle_inventory");
-      const storedDonations = localStorage.getItem("pcrecycle_donations");
-      const storedOrders = localStorage.getItem("pcrecycle_orders");
-      const storedCharities = localStorage.getItem("pcrecycle_charities");
       const storedCart = localStorage.getItem("pcrecycle_cart");
-
-      setInventory(storedInventory ? JSON.parse(storedInventory) : defaultInventory);
-      setDonations(storedDonations ? JSON.parse(storedDonations) : defaultDonations);
-      setOrders(storedOrders ? JSON.parse(storedOrders) : defaultOrders);
-      setCharities(storedCharities ? JSON.parse(storedCharities) : defaultCharities);
-      setCart(storedCart ? JSON.parse(storedCart) : []);
+      if (storedCart) {
+        setCart(JSON.parse(storedCart));
+      }
     } catch (e) {
-      console.error("Error loading data from localStorage:", e);
-      setInventory(defaultInventory);
-      setDonations(defaultDonations);
-      setOrders(defaultOrders);
-      setCharities(defaultCharities);
-      setCart([]);
+      console.error("Local storage load error:", e);
     }
-    setIsLoaded(true);
   }, []);
 
-  // Save changes to local storage when state updates
-  useEffect(() => {
-    if (!isLoaded) return;
-    localStorage.setItem("pcrecycle_inventory", JSON.stringify(inventory));
-  }, [inventory, isLoaded]);
-
-  useEffect(() => {
-    if (!isLoaded) return;
-    localStorage.setItem("pcrecycle_donations", JSON.stringify(donations));
-  }, [donations, isLoaded]);
-
-  useEffect(() => {
-    if (!isLoaded) return;
-    localStorage.setItem("pcrecycle_orders", JSON.stringify(orders));
-  }, [orders, isLoaded]);
-
-  useEffect(() => {
-    if (!isLoaded) return;
-    localStorage.setItem("pcrecycle_charities", JSON.stringify(charities));
-  }, [charities, isLoaded]);
-
+  // Save Cart to local storage
   useEffect(() => {
     if (!isLoaded) return;
     localStorage.setItem("pcrecycle_cart", JSON.stringify(cart));
   }, [cart, isLoaded]);
+
+  // Main Load Effect (Local Storage OR Supabase Hybrid)
+  useEffect(() => {
+    const loadDatabase = async () => {
+      const useCloud = isSupabaseConfigured();
+      setIsUsingCloudDb(useCloud);
+
+      if (useCloud) {
+        try {
+          console.log("PCCycle: Supabase is configured. Fetching database from cloud...");
+          
+          // 1. Fetch Charities
+          const { data: dbCharities, error: charError } = await supabase
+            .from("charities")
+            .select("*");
+          if (charError) throw charError;
+
+          // 2. Fetch Inventory
+          const { data: dbInventory, error: invError } = await supabase
+            .from("inventory")
+            .select("*");
+          if (invError) throw invError;
+
+          // 3. Fetch Donations
+          const { data: dbDonations, error: donError } = await supabase
+            .from("donations")
+            .select("*");
+          if (donError) throw donError;
+
+          // 4. Fetch Orders and Links
+          const { data: dbOrders, error: ordError } = await supabase
+            .from("orders")
+            .select("*");
+          if (ordError) throw ordError;
+
+          const { data: dbLinks, error: linkError } = await supabase
+            .from("order_items")
+            .select("*");
+          if (linkError) throw linkError;
+
+          // Map items
+          const mappedInventory = dbInventory.map(mapDbToPart);
+          const mappedCharities = dbCharities.map(mapDbToCharity);
+          const mappedDonations = dbDonations.map(mapDbToDonation);
+
+          const mappedOrders = dbOrders.map((ord: any) => {
+            const orderLinks = dbLinks.filter((lnk: any) => lnk.order_id === ord.id);
+            const partIds = orderLinks.map((lnk: any) => lnk.part_id);
+            const orderItems = mappedInventory.filter((item) => partIds.includes(item.id));
+            
+            return {
+              id: ord.id,
+              customerName: ord.customer_name,
+              customerEmail: ord.customer_email,
+              shippingAddress: ord.shipping_address,
+              totalPrice: Number(ord.total_price),
+              orderDate: ord.order_date,
+              items: orderItems,
+            };
+          });
+
+          setCharities(mappedCharities);
+          setInventory(mappedInventory);
+          setDonations(mappedDonations);
+          setOrders(mappedOrders);
+        } catch (e) {
+          console.error("Supabase load failed. Falling back to localStorage.", e);
+          setIsUsingCloudDb(false);
+          loadLocalStorageData();
+        }
+      } else {
+        console.log("PCCycle: Supabase not configured. Using local storage mock database.");
+        loadLocalStorageData();
+      }
+      setIsLoaded(true);
+    };
+
+    const loadLocalStorageData = () => {
+      try {
+        const storedInventory = localStorage.getItem("pcrecycle_inventory");
+        const storedDonations = localStorage.getItem("pcrecycle_donations");
+        const storedOrders = localStorage.getItem("pcrecycle_orders");
+        const storedCharities = localStorage.getItem("pcrecycle_charities");
+
+        setInventory(storedInventory ? JSON.parse(storedInventory) : defaultInventory);
+        setDonations(storedDonations ? JSON.parse(storedDonations) : []);
+        setOrders(storedOrders ? JSON.parse(storedOrders) : []);
+        setCharities(storedCharities ? JSON.parse(storedCharities) : defaultCharities);
+      } catch (e) {
+        console.error("Error loading localStorage:", e);
+      }
+    };
+
+    loadDatabase();
+  }, []);
+
+  // Save changes to local storage ONLY if running in local fallback mode
+  useEffect(() => {
+    if (!isLoaded || isUsingCloudDb) return;
+    localStorage.setItem("pcrecycle_inventory", JSON.stringify(inventory));
+  }, [inventory, isLoaded, isUsingCloudDb]);
+
+  useEffect(() => {
+    if (!isLoaded || isUsingCloudDb) return;
+    localStorage.setItem("pcrecycle_donations", JSON.stringify(donations));
+  }, [donations, isLoaded, isUsingCloudDb]);
+
+  useEffect(() => {
+    if (!isLoaded || isUsingCloudDb) return;
+    localStorage.setItem("pcrecycle_orders", JSON.stringify(orders));
+  }, [orders, isLoaded, isUsingCloudDb]);
+
+  useEffect(() => {
+    if (!isLoaded || isUsingCloudDb) return;
+    localStorage.setItem("pcrecycle_charities", JSON.stringify(charities));
+  }, [charities, isLoaded, isUsingCloudDb]);
 
   const toggleTheme = () => {
     const nextTheme = theme === "dark" ? "light" : "dark";
@@ -296,68 +386,190 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCart([]);
   };
 
-  const submitDonation = (donation: Omit<Donation, "id" | "status" | "submittedAt">) => {
+  // Asynchronous Operations mapping to DB or state
+  const submitDonation = async (donation: Omit<Donation, "id" | "status" | "submittedAt">) => {
+    const id = `don-${Date.now()}`;
+    const date = new Date().toISOString();
+
     const newDonation: Donation = {
       ...donation,
-      id: `don-${Date.now()}`,
+      id,
       status: "pending",
-      submittedAt: new Date().toISOString(),
+      submittedAt: date,
     };
+
+    if (isUsingCloudDb) {
+      const dbRow = {
+        id,
+        ...mapDonationToDb(donation),
+        submitted_at: date,
+      };
+      const { error } = await supabase.from("donations").insert(dbRow);
+      if (error) {
+        console.error("Supabase insert donation failed:", error);
+        alert("Database connection error. Donation was not logged.");
+        return;
+      }
+    }
+
     setDonations((prev) => [newDonation, ...prev]);
   };
 
-  const updateDonationStatus = (id: string, status: Donation["status"]) => {
+  const updateDonationStatus = async (id: string, status: Donation["status"]) => {
+    if (isUsingCloudDb) {
+      const { error } = await supabase
+        .from("donations")
+        .update({ status })
+        .eq("id", id);
+      if (error) {
+        console.error("Supabase update donation status failed:", error);
+        return;
+      }
+    }
+
     setDonations((prev) =>
       prev.map((don) => (don.id === id ? { ...don, status } : don))
     );
   };
 
-  const addPart = (part: Omit<PCPart, "id">) => {
+  const addPart = async (part: Omit<PCPart, "id">) => {
+    const id = `part-${Date.now()}`;
     const newPart: PCPart = {
       ...part,
-      id: `part-${Date.now()}`,
+      id,
     };
+
+    if (isUsingCloudDb) {
+      const dbRow = {
+        id,
+        ...mapPartToDb(part),
+      };
+      const { error } = await supabase.from("inventory").insert(dbRow);
+      if (error) {
+        console.error("Supabase insert catalog part failed:", error);
+        return;
+      }
+    }
+
     setInventory((prev) => [newPart, ...prev]);
   };
 
-  const updatePart = (id: string, updates: Partial<PCPart>) => {
+  const updatePart = async (id: string, updates: Partial<PCPart>) => {
+    if (isUsingCloudDb) {
+      const dbRow: any = {};
+      if (updates.name !== undefined) dbRow.name = updates.name;
+      if (updates.category !== undefined) dbRow.category = updates.category;
+      if (updates.specs !== undefined) dbRow.specs = updates.specs;
+      if (updates.condition !== undefined) dbRow.condition = updates.condition;
+      if (updates.price !== undefined) dbRow.price = updates.price;
+      if (updates.donorName !== undefined) dbRow.donor_name = updates.donorName;
+      if (updates.charityId !== undefined) dbRow.charity_id = updates.charityId;
+      if (updates.status !== undefined) dbRow.status = updates.status;
+      if (updates.imageUrl !== undefined) dbRow.image_url = updates.imageUrl;
+
+      const { error } = await supabase
+        .from("inventory")
+        .update(dbRow)
+        .eq("id", id);
+      if (error) {
+        console.error("Supabase update part failed:", error);
+        return;
+      }
+    }
+
     setInventory((prev) =>
       prev.map((part) => (part.id === id ? { ...part, ...updates } : part))
     );
   };
 
-  const deletePart = (id: string) => {
+  const deletePart = async (id: string) => {
+    if (isUsingCloudDb) {
+      const { error } = await supabase.from("inventory").delete().eq("id", id);
+      if (error) {
+        console.error("Supabase delete part failed:", error);
+        return;
+      }
+    }
+
     setInventory((prev) => prev.filter((part) => part.id !== id));
     removeFromCart(id);
   };
 
-  const placeOrder = (customer: { name: string; email: string; address: string }) => {
+  const placeOrder = async (customer: { name: string; email: string; address: string }) => {
     if (cart.length === 0) return false;
 
-    // Get actual items in cart
+    // Filter active items
     const cartItems = inventory.filter((part) => cart.includes(part.id) && part.status === "available");
     if (cartItems.length === 0) return false;
 
     const totalPrice = cartItems.reduce((sum, item) => sum + item.price, 0);
+    const orderId = `ord-${Date.now()}`;
+    const date = new Date().toISOString();
 
-    // Create order
     const newOrder: Order = {
-      id: `ord-${Date.now()}`,
+      id: orderId,
       customerName: customer.name,
       customerEmail: customer.email,
       shippingAddress: customer.address,
       items: cartItems,
       totalPrice,
-      orderDate: new Date().toISOString(),
+      orderDate: date,
     };
 
-    // Mark items as sold
+    if (isUsingCloudDb) {
+      try {
+        // 1. Insert order
+        const { error: ordError } = await supabase.from("orders").insert({
+          id: orderId,
+          customer_name: customer.name,
+          customer_email: customer.email,
+          shipping_address: customer.address,
+          total_price: totalPrice,
+          order_date: date,
+        });
+        if (ordError) throw ordError;
+
+        // 2. Insert order items link
+        const linkRows = cartItems.map((item) => ({
+          order_id: orderId,
+          part_id: item.id,
+        }));
+        const { error: linkError } = await supabase.from("order_items").insert(linkRows);
+        if (linkError) throw linkError;
+
+        // 3. Mark items as sold in DB
+        const itemIds = cartItems.map((item) => item.id);
+        const { error: invError } = await supabase
+          .from("inventory")
+          .update({ status: "sold" })
+          .in("id", itemIds);
+        if (invError) throw invError;
+
+        // 4. Update charities raised totals in DB
+        for (const item of cartItems) {
+          const charity = charities.find((c) => c.id === item.charityId);
+          if (charity) {
+            const nextFunds = charity.totalFundsRaised + item.price;
+            const { error: charErr } = await supabase
+              .from("charities")
+              .update({ total_funds_raised: nextFunds })
+              .eq("id", item.charityId);
+            if (charErr) throw charErr;
+          }
+        }
+      } catch (e) {
+        console.error("Supabase order transaction failed:", e);
+        alert("Transaction failed on cloud database. Order was aborted.");
+        return false;
+      }
+    }
+
+    // Update state locally (works for both cloud db and localStorage)
     const itemIds = cartItems.map((item) => item.id);
     setInventory((prev) =>
       prev.map((part) => (itemIds.includes(part.id) ? { ...part, status: "sold" } : part))
     );
 
-    // Update charities funds raised based on item allocation
     setCharities((prev) =>
       prev.map((charity) => {
         const matchingItems = cartItems.filter((item) => item.charityId === charity.id);
@@ -394,6 +606,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         updatePart,
         deletePart,
         placeOrder,
+        isUsingCloudDb,
       }}
     >
       {children}

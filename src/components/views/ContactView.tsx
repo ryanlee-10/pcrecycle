@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { Mail, Phone, MapPin, Send, CheckCircle2 } from "lucide-react";
+import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
 
 export const ContactView: React.FC = () => {
   const [formData, setFormData] = useState({
@@ -18,22 +19,36 @@ export const ContactView: React.FC = () => {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Log the message into local storage contact box for the Admin to read
-    try {
-      const stored = localStorage.getItem("pcrecycle_messages");
-      const messages = stored ? JSON.parse(stored) : [];
-      const newMsg = {
-        id: `msg-${Date.now()}`,
-        ...formData,
-        date: new Date().toISOString(),
-        read: false,
-      };
-      localStorage.setItem("pcrecycle_messages", JSON.stringify([newMsg, ...messages]));
-    } catch (err) {
-      console.error("Failed to save contact message:", err);
+    const newMsg = {
+      id: `msg-${Date.now()}`,
+      name: formData.name,
+      email: formData.email,
+      subject: formData.subject,
+      message: formData.message,
+      date: new Date().toISOString(),
+      read: false,
+    };
+
+    if (isSupabaseConfigured()) {
+      try {
+        const { error } = await supabase.from("messages").insert(newMsg);
+        if (error) throw error;
+      } catch (err) {
+        console.error("Failed to save contact message to cloud:", err);
+        alert("Database connection error. Message could not be sent.");
+        return;
+      }
+    } else {
+      try {
+        const stored = localStorage.getItem("pcrecycle_messages");
+        const messages = stored ? JSON.parse(stored) : [];
+        localStorage.setItem("pcrecycle_messages", JSON.stringify([newMsg, ...messages]));
+      } catch (err) {
+        console.error("Failed to save contact message locally:", err);
+      }
     }
 
     setSubmitted(true);

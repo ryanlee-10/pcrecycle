@@ -35,7 +35,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({ setActiveView }) => 
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (cartItems.length === 0) return;
@@ -47,7 +47,7 @@ export const CheckoutView: React.FC<CheckoutViewProps> = ({ setActiveView }) => 
       charityAllocations[name] = (charityAllocations[name] || 0) + item.price;
     });
 
-    const success = placeOrder({
+    const success = await placeOrder({
       name: formData.name,
       email: formData.email,
       address: `${formData.address}, ${formData.city}, ${formData.state} ${formData.zip}`,

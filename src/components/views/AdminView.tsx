@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useStore, PCPart, Donation } from "@/context/StoreContext";
 import { Cpu, ShieldCheck, Trash2, Heart, Inbox, List, BarChart3, Mail, PlusCircle, Check, X, ShieldAlert } from "lucide-react";
+import { supabase } from "@/lib/supabaseClient";
 
 export const AdminView: React.FC = () => {
   const {
@@ -14,6 +15,7 @@ export const AdminView: React.FC = () => {
     updatePart,
     charities,
     orders,
+    isUsingCloudDb,
   } = useStore();
 
   // Admin sub-tabs
@@ -37,45 +39,76 @@ export const AdminView: React.FC = () => {
     specsVal2: "",
   });
 
-  // Load offline messages
+  // Load offline or online messages
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem("pcrecycle_messages");
-      if (stored) {
-        setMessages(JSON.parse(stored));
+    const loadMessages = async () => {
+      if (isUsingCloudDb) {
+        try {
+          const { data, error } = await supabase
+            .from("messages")
+            .select("*")
+            .order("date", { ascending: false });
+          if (error) throw error;
+          setMessages(data || []);
+        } catch (e) {
+          console.error("Supabase load messages failed:", e);
+        }
       } else {
-        // Seed initial message if empty
-        const initialMsg = [
-          {
-            id: "msg-seed-1",
-            name: "John Doe",
-            email: "john@techsolutions.com",
-            subject: "Bulk Motherboards Donation Logistics",
-            message: "Hello! We have about 40 working server-grade motherboard components. Can we arrange a drop-off or pickup next week?",
-            date: new Date(Date.now() - 3600000 * 24).toISOString(),
-            read: false,
-          },
-        ];
-        localStorage.setItem("pcrecycle_messages", JSON.stringify(initialMsg));
-        setMessages(initialMsg);
+        try {
+          const stored = localStorage.getItem("pcrecycle_messages");
+          if (stored) {
+            setMessages(JSON.parse(stored));
+          } else {
+            const initialMsg = [
+              {
+                id: "msg-seed-1",
+                name: "John Doe",
+                email: "john@techsolutions.com",
+                subject: "Bulk Motherboards Donation Logistics",
+                message: "Hello! We have about 40 working server-grade motherboard components. Can we arrange a drop-off or pickup next week?",
+                date: new Date(Date.now() - 3600000 * 24).toISOString(),
+                read: false,
+              },
+            ];
+            localStorage.setItem("pcrecycle_messages", JSON.stringify(initialMsg));
+            setMessages(initialMsg);
+          }
+        } catch (err) {
+          console.error(err);
+        }
       }
-    } catch (err) {
-      console.error(err);
-    }
-  }, []);
+    };
+
+    loadMessages();
+  }, [isUsingCloudDb]);
 
   // Update read status for messages
-  const markMessageAsRead = (id: string) => {
+  const markMessageAsRead = async (id: string) => {
     const updated = messages.map((m) => (m.id === id ? { ...m, read: true } : m));
     setMessages(updated);
-    localStorage.setItem("pcrecycle_messages", JSON.stringify(updated));
+
+    if (isUsingCloudDb) {
+      const { error } = await supabase
+        .from("messages")
+        .update({ read: true })
+        .eq("id", id);
+      if (error) console.error("Supabase update message failed:", error);
+    } else {
+      localStorage.setItem("pcrecycle_messages", JSON.stringify(updated));
+    }
   };
 
   // Delete message
-  const deleteMessage = (id: string) => {
+  const deleteMessage = async (id: string) => {
     const updated = messages.filter((m) => m.id !== id);
     setMessages(updated);
-    localStorage.setItem("pcrecycle_messages", JSON.stringify(updated));
+
+    if (isUsingCloudDb) {
+      const { error } = await supabase.from("messages").delete().eq("id", id);
+      if (error) console.error("Supabase delete message failed:", error);
+    } else {
+      localStorage.setItem("pcrecycle_messages", JSON.stringify(updated));
+    }
   };
 
   // Stats calculators
