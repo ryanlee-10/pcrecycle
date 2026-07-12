@@ -446,7 +446,7 @@ export const AdminView: React.FC = () => {
           )}
 
           {/* Donation Queue Table */}
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="rounded-xl border border-border bg-card overflow-x-auto">
             <table className="min-w-full divide-y divide-border">
               <thead className="bg-secondary/35 text-xs text-muted-foreground">
                 <tr>
@@ -527,7 +527,7 @@ export const AdminView: React.FC = () => {
       {/* TAB CONTENT: 3. Item Catalog */}
       {activeTab === "catalog" && (
         <div className="space-y-6">
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="rounded-xl border border-border bg-card overflow-x-auto">
             <table className="min-w-full divide-y divide-border">
               <thead className="bg-secondary/35 text-xs text-muted-foreground">
                 <tr>

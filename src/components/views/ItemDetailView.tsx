@@ -126,7 +126,7 @@ export const ItemDetailView: React.FC<ItemDetailViewProps> = ({ itemId, setActiv
           {/* Technical Specifications */}
           <div className="space-y-4">
             <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wider">Component Specifications</h3>
-            <div className="overflow-hidden rounded-lg border border-border bg-card">
+            <div className="overflow-x-auto rounded-lg border border-border bg-card">
               <table className="min-w-full divide-y divide-border">
                 <tbody className="divide-y divide-border">
                   {Object.entries(item.specs).map(([key, val]) => (

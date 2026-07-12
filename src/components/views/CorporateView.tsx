@@ -231,7 +231,7 @@ export const CorporateView: React.FC = () => {
                   {corporateDonations.length === 0 ? (
                     <p className="text-[11px] text-muted-foreground/60 italic">No raw donation submissions found matching this query. Check inventory parts above.</p>
                   ) : (
-                    <div className="overflow-hidden rounded-lg border border-border text-xs">
+                    <div className="overflow-x-auto rounded-lg border border-border text-xs">
                       <table className="min-w-full divide-y divide-border">
                         <thead className="bg-secondary/40">
                           <tr>

@@ -1,8 +1,8 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { useStore } from "@/context/StoreContext";
-import { Cpu, ShoppingCart, UserCheck, ShieldAlert, Mail, Moon, Sun } from "lucide-react";
+import { Cpu, ShoppingCart, UserCheck, ShieldAlert, Mail, Moon, Sun, Menu, X } from "lucide-react";
 
 interface HeaderProps {
   activeView: string;
@@ -12,6 +12,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, setCartOpen }) => {
   const { cart, theme, toggleTheme } = useStore();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navItems = [
     { id: "home", label: "Shop Parts", icon: Cpu },
@@ -25,7 +26,10 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, setCa
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Logo */}
         <div
-          onClick={() => setActiveView("home")}
+          onClick={() => {
+            setActiveView("home");
+            setMobileMenuOpen(false);
+          }}
           className="flex cursor-pointer items-center space-x-2 text-primary hover:opacity-90 transition-opacity"
         >
           <Cpu className="h-8 w-8 animate-float text-primary" />
@@ -57,7 +61,7 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, setCa
         </nav>
 
         {/* Right side controls */}
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2.5">
           {/* Theme Toggle */}
           <button
             onClick={toggleTheme}
@@ -69,7 +73,10 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, setCa
 
           {/* Cart Button */}
           <button
-            onClick={() => setCartOpen(true)}
+            onClick={() => {
+              setCartOpen(true);
+              setMobileMenuOpen(false);
+            }}
             className="relative flex items-center rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
             title="Open Cart"
           >
@@ -80,28 +87,44 @@ export const Header: React.FC<HeaderProps> = ({ activeView, setActiveView, setCa
               </span>
             )}
           </button>
+
+          {/* Mobile Hamburger menu */}
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="flex md:hidden rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+            title="Toggle Mobile Menu"
+          >
+            {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
         </div>
       </div>
 
-      {/* Mobile Navigation Header */}
-      <div className="flex md:hidden justify-around border-t border-border/50 py-2 px-1">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeView === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => setActiveView(item.id)}
-              className={`flex flex-col items-center justify-center rounded-md px-2 py-1 text-[11px] font-medium transition-all ${
-                isActive ? "text-primary font-bold" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Icon className="h-4.5 w-4.5 mb-0.5" />
-              <span>{item.label.split(" ")[0]}</span>
-            </button>
-          );
-        })}
-      </div>
+      {/* Mobile Navigation Dropdown */}
+      {mobileMenuOpen && (
+        <div className="md:hidden border-t border-border/80 bg-card px-4 py-3 space-y-1 shadow-lg">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeView === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveView(item.id);
+                  setMobileMenuOpen(false);
+                }}
+                className={`flex w-full items-center space-x-3 rounded-md px-3 py-2.5 text-sm font-semibold transition-all ${
+                  isActive
+                    ? "bg-secondary text-primary glow-primary"
+                    : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                }`}
+              >
+                <Icon className="h-4 w-4 text-primary" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </header>
   );
 };
